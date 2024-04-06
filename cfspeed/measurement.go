@@ -230,28 +230,36 @@ func GetMeasurementMetadata() (*MeasurementMetadata, error) {
 	}, nil
 }
 
-func MeasureRTT() (*Stats, *Stats, error) {
-	durations := []time.Duration{}
-	cfReqDurs := []time.Duration{}
+type RTTStats struct {
+    RTT           *Stats
+    CFRequestTime *Stats
+}
 
-	for measureUntil := time.Now().Add(rttMeasurementDuration); time.Since(measureUntil) < 0; {
-		measurement, err := doUplinkMeasurement(0, time.Now())
-		if err != nil {
-			return nil, nil, err
-		}
+func MeasureRTT() (*RTTStats, error) {
+    durations := []time.Duration{}
+    cfReqDurs := []time.Duration{}
 
-		cfReqDur := getCFReqDur(&measurement.HTTPRespHeader)
-		cfReqDurs = append(cfReqDurs, cfReqDur)
+    for measureUntil := time.Now().Add(rttMeasurementDuration); time.Since(measureUntil) < 0; {
+        measurement, err := doUplinkMeasurement(0, time.Now())
+        if err != nil {
+            return nil, err
+        }
 
-		adjustedDuration := measurement.Duration - cfReqDur
-		if adjustedDuration < 0 {
-			adjustedDuration = 0
-		}
+        cfReqDur := getCFReqDur(&measurement.HTTPRespHeader)
+        cfReqDurs = append(cfReqDurs, cfReqDur)
 
-		durations = append(durations, adjustedDuration)
-	}
+        adjustedDuration := measurement.Duration - cfReqDur
+        if adjustedDuration < 0 {
+            adjustedDuration = 0
+        }
 
-	return getDurationMSStats(durations), getDurationMSStats(cfReqDurs), nil
+        durations = append(durations, adjustedDuration)
+    }
+
+    return &RTTStats{
+        RTT:           getDurationMSStats(durations),
+        CFRequestTime: getDurationMSStats(cfReqDurs),
+    }, nil
 }
 
 func MeasureDownlink() (*SpeedMeasurementStats, error) {

@@ -22,8 +22,8 @@ type Stats struct {
 	Deciles  []float64
 }
 
-type Sample[T any] struct {
-	Value     T
+type Sample struct {
+	Value     float64
 	Timestamp time.Time
 }
 
@@ -113,7 +113,7 @@ func getF64Stats(series []float64) *Stats {
 	return ret
 }
 
-func reverseValueSamplesInPlace[T any](series []*Sample[T]) {
+func reverseValueSamplesInPlace(series []*Sample) {
 	seriesLen := len(series)
 	halfLen := seriesLen / 2
 
@@ -122,8 +122,8 @@ func reverseValueSamplesInPlace[T any](series []*Sample[T]) {
 	}
 }
 
-func getValuesFromSamples[T any](samples []*Sample[T]) []T {
-	ret := make([]T, len(samples))
+func getValuesFromSamples(samples []*Sample) []float64 {
+	ret := make([]float64, len(samples))
 
 	for index, sample := range samples {
 		ret[index] = sample.Value
@@ -163,8 +163,8 @@ func getReversedIOEvents(ioEvents []*IOEvent) []*IOEvent {
 
 	return ret
 }
-func getIOReadMBPSSamples(_, end time.Time, cfReqDur time.Duration, ioEvents []*IOEvent) []*Sample[float64] {
-	mbpsSamples := []*Sample[float64]{}
+func getIOReadMBPSSamples(_, end time.Time, cfReqDur time.Duration, ioEvents []*IOEvent) []*Sample {
+	mbpsSamples := []*Sample{}
 
 	ioEventsToAnalyse := ioEvents
 	adjustedEndTime := end.Add(-cfReqDur)
@@ -187,7 +187,7 @@ func getIOReadMBPSSamples(_, end time.Time, cfReqDur time.Duration, ioEvents []*
 
 		sinceStart := event.Timestamp.Sub(windowStart)
 		if (float64(event.Timestamp.Sub(ioEventsToAnalyse[index].Timestamp).Milliseconds()) > inferredUnbufferedIOThreshold && sinceStart > ioSamplingWindowWidthMin) || index == lastIndexForFor {
-			mbpsSamples = append(mbpsSamples, &Sample[float64]{
+			mbpsSamples = append(mbpsSamples, &Sample{
 				Value:     float64(8*sizeSum) / float64(sinceStart.Microseconds()),
 				Timestamp: event.Timestamp,
 			})
@@ -200,8 +200,8 @@ func getIOReadMBPSSamples(_, end time.Time, cfReqDur time.Duration, ioEvents []*
 	return mbpsSamples
 }
 
-func getIOWriteMBPSSamples(start, _ time.Time, cfReqDur time.Duration, ioEvents []*IOEvent) []*Sample[float64] {
-	mbpsSamples := []*Sample[float64]{}
+func getIOWriteMBPSSamples(start, _ time.Time, cfReqDur time.Duration, ioEvents []*IOEvent) []*Sample {
+	mbpsSamples := []*Sample{}
 
 	ioEventsToAnalyse := getReversedIOEvents(ioEvents)
 	adjustedStartTime := start.Add(cfReqDur)
@@ -224,7 +224,7 @@ func getIOWriteMBPSSamples(start, _ time.Time, cfReqDur time.Duration, ioEvents 
 
 		sinceStart := windowStart.Sub(event.Timestamp)
 		if (float64(ioEventsToAnalyse[index].Timestamp.Sub(event.Timestamp).Milliseconds()) > inferredUnbufferedIOThreshold && sinceStart > ioSamplingWindowWidthMin) || index == lastIndexForFor {
-			mbpsSamples = append(mbpsSamples, &Sample[float64]{
+			mbpsSamples = append(mbpsSamples, &Sample{
 				Value:     float64(8*sizeSum) / float64(sinceStart.Microseconds()),
 				Timestamp: windowStart,
 			})
@@ -239,18 +239,18 @@ func getIOWriteMBPSSamples(start, _ time.Time, cfReqDur time.Duration, ioEvents 
 	return mbpsSamples
 }
 
-func getMBPSSamplesFromMeasurement(measurement *SpeedMeasurement) []*Sample[float64] {
+func getMBPSSamplesFromMeasurement(measurement *SpeedMeasurement) []*Sample {
 	switch measurement.Direction {
 	case DirectionDownlink:
 		return getIOWriteMBPSSamples(measurement.Start, measurement.End, measurement.CFReqDur, measurement.IOSampler.Events)
 	case DirectionUplink:
 		return getIOReadMBPSSamples(measurement.Start, measurement.End, measurement.CFReqDur, measurement.IOSampler.Events)
 	default:
-		return []*Sample[float64]{}
+		return []*Sample{}
 	}
 }
 
-func chooseGroupWithYoungestHead(groupedMBPSSamples [][]*Sample[float64], groupHead []int) int {
+func chooseGroupWithYoungestHead(groupedMBPSSamples [][]*Sample, groupHead []int) int {
 	youngestGroup := -1
 
 	youngestTimestamp := time.Time{}
@@ -267,10 +267,10 @@ func chooseGroupWithYoungestHead(groupedMBPSSamples [][]*Sample[float64], groupH
 	return youngestGroup
 }
 
-func consolidateGroupedMBPSSamples(groupedMBPSSamples [][]*Sample[float64]) []*Sample[float64] {
+func consolidateGroupedMBPSSamples(groupedMBPSSamples [][]*Sample) []*Sample {
 	nGroups := len(groupedMBPSSamples)
 
-	mergedMBPSSamples := []*Sample[float64]{}
+	mergedMBPSSamples := []*Sample{}
 	curGroupMBPS := make([]float64, nGroups)
 	curGroupHead := make([]int, nGroups)
 
@@ -289,7 +289,7 @@ func consolidateGroupedMBPSSamples(groupedMBPSSamples [][]*Sample[float64]) []*S
 
 		// Add the sample if and only if there is one or more active groups
 		if curSummedMBPS := sumF64s(curGroupMBPS); curSummedMBPS > 0 {
-			mergedMBPSSamples = append(mergedMBPSSamples, &Sample[float64]{
+			mergedMBPSSamples = append(mergedMBPSSamples, &Sample{
 				Value:     curSummedMBPS,
 				Timestamp: youngestSample.Timestamp,
 			})
@@ -298,13 +298,13 @@ func consolidateGroupedMBPSSamples(groupedMBPSSamples [][]*Sample[float64]) []*S
 		curGroupHead[youngestGroup] -= 1
 	}
 
-	reverseValueSamplesInPlace[float64](mergedMBPSSamples)
+	reverseValueSamplesInPlace(mergedMBPSSamples)
 
 	return mergedMBPSSamples
 }
 
-func analyseMeasurements(measurements []*SpeedMeasurement, injectZeroPointSample bool) ([]*Sample[float64], int64, int64) {
-	mbpsSamples := []*Sample[float64]{}
+func analyseMeasurements(measurements []*SpeedMeasurement, injectZeroPointSample bool) ([]*Sample, int64, int64) {
+	mbpsSamples := []*Sample{}
 	sizeSum := int64(0)
 	durationSum := int64(0)
 
@@ -312,12 +312,12 @@ func analyseMeasurements(measurements []*SpeedMeasurement, injectZeroPointSample
 		if injectZeroPointSample {
 			switch measurement.Direction {
 			case DirectionDownlink:
-				mbpsSamples = append(mbpsSamples, &Sample[float64]{
+				mbpsSamples = append(mbpsSamples, &Sample{
 					Value:     0,
 					Timestamp: measurement.Start.Add(measurement.CFReqDur),
 				})
 			case DirectionUplink:
-				mbpsSamples = append(mbpsSamples, &Sample[float64]{
+				mbpsSamples = append(mbpsSamples, &Sample{
 					Value:     0,
 					Timestamp: measurement.Start,
 				})
@@ -333,10 +333,10 @@ func analyseMeasurements(measurements []*SpeedMeasurement, injectZeroPointSample
 	return mbpsSamples, sizeSum, durationSum
 }
 
-func analyseMeasurementGroups(measurementGroups [][]*SpeedMeasurement) ([]*Sample[float64], int64, int64) {
+func analyseMeasurementGroups(measurementGroups [][]*SpeedMeasurement) ([]*Sample, int64, int64) {
 	sizeSum := int64(0)
 
-	groupedMBPSSamples := make([][]*Sample[float64], len(measurementGroups))
+	groupedMBPSSamples := make([][]*Sample, len(measurementGroups))
 	firstStart := time.Unix(1<<62-1, 1<<62-1)
 	lastEnd := time.Time{}
 
